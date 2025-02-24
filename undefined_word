@@ -1,0 +1,92 @@
+import { z } from 'zod';
+import { OpenAI } from 'langchain/llms/openai';
+import { PromptTemplate } from 'langchain/prompts';
+import { StructuredOutputParser } from 'langchain/output_parsers';
+
+// モデルの初期化
+const model = new OpenAI({
+  temperature: 0,
+  modelName: 'gpt-3.5-turbo',
+  openAIApiKey: process.env.OPENAI_API_KEY,
+});
+
+// データ構造の定義（Zodスキーマ）
+const undefinedWordsSchema = z.object({
+  undefined_words: z.array(z.string()).describe('意味が曖昧でcontextに記載がない単語のリスト'),
+  reasons: z.array(z.string()).describe('各単語が未定義と判断された理由'),
+});
+
+// 出力タイプの定義
+type UndefinedWords = z.infer<typeof undefinedWordsSchema>;
+
+// 未定義語を検出する関数
+async function detectUndefinedWords(
+  query: string, 
+  context: string
+): Promise<UndefinedWords> {
+  // パーサーのセットアップ
+  const parser = StructuredOutputParser.fromZodSchema(undefinedWordsSchema);
+  const formatInstructions = parser.getFormatInstructions();
+  
+  // プロンプトテンプレート
+  const prompt = new PromptTemplate({
+    template: `ユーザークエリの中で意味が曖昧でかつ[context]に存在しない単語を検出し、理由を説明してください。
+    {format_instructions}
+    
+    [ユーザークエリ]
+    {query}
+    
+    [context]
+    {context}
+    `,
+    inputVariables: ['query', 'context'],
+    partialVariables: { format_instructions: formatInstructions },
+  });
+  
+  // プロンプトの生成
+  const input = await prompt.format({
+    query,
+    context,
+  });
+  
+  // LLMからの回答を取得
+  const response = await model.call(input);
+  
+  // 回答をパース
+  return parser.parse(response);
+}
+
+// 使用例
+async function main() {
+  // テキストの例
+  const jokeQuery = "湖の畔に佇むと、突然の時雨音が響き渡り、その調べに合わせて霧翼の生き物たちが舞い始めた。伝説によれば、この音色を聞いた者は、一瞬だけ異界の扉を垣間見ることができるという。幾重にも重なる水の音色は、心の奥深くに眠る記憶を呼び覚まし、湖面には過去の映像が鏡のように映し出されていった。";
+  
+  const context = `
+  [context]
+  花霧（はなぎり）: 意味 花が舞い散る様子が霧のように見える現象
+  月影人（つきかげびと）: 意味 月明かりの中でだけ姿を現す伝説の人
+  時雨音（しぐれね）- 時雨が降る時だけ聞こえる神秘的な音色
+  星語り（ほしがたり）- 星に願いを伝えると叶うとされる古い儀式
+  夢路師（ゆめじし）- 他人の夢に入り込み導く能力を持つ人
+  風記憶（かぜきおく）- 風に乗せて送ると相手に記憶が届くとされる言葉
+  空色言葉（そらいろことば）- 真実だけを映し出すと言われる特別な言葉
+  雨音石（あまねいし）- 雨が降ると音楽を奏でる不思議な石
+  光守り（ひかりまもり）- 闇から光を守る古代からの役目
+  波間信（なみまのぶ）- 海の波に託すと必ず届くとされるメッセージ
+  `;
+  
+  try {
+    // 未定義語の検出
+    const result = await detectUndefinedWords(jokeQuery, context);
+    console.log(JSON.stringify(result, null, 2));
+  } catch (error) {
+    console.error('Error:', error);
+  }
+}
+
+// メイン関数を実行
+if (require.main === module) {
+  main();
+}
+
+export { detectUndefinedWords, undefinedWordsSchema };
