@@ -90,3 +90,302 @@ if (require.main === module) {
 }
 
 export { detectUndefinedWords, undefinedWordsSchema };
+
+
+// 実用的な木構造の実装例
+
+// ノードのインターフェース定義
+interface ITreeNode<T> {
+  id: string;                 // 一意のID（検索・参照用）
+  value: T;                   // ノードの値
+  children: ITreeNode<T>[];   // 子ノードの配列
+  parent?: ITreeNode<T>;      // 親ノードへの参照（オプショナル）
+  metadata?: Record<string, any>; // メタデータ（拡張用）
+}
+
+// ツリーノードの実装
+class TreeNode<T> implements ITreeNode<T> {
+  id: string;
+  value: T;
+  children: TreeNode<T>[];
+  parent?: TreeNode<T>;
+  metadata: Record<string, any>;
+
+  constructor(value: T, id?: string) {
+    this.id = id || this.generateId();
+    this.value = value;
+    this.children = [];
+    this.metadata = {};
+  }
+
+  // ランダムなIDを生成（実際にはUUIDライブラリなどを使うことが多い）
+  private generateId(): string {
+    return Math.random().toString(36).substring(2, 15);
+  }
+
+  // 子ノードを追加
+  addChild(value: T, id?: string): TreeNode<T> {
+    const child = new TreeNode<T>(value, id);
+    child.parent = this;
+    this.children.push(child);
+    return child;
+  }
+
+  // 特定のIDを持つ子ノードを削除
+  removeChild(id: string): boolean {
+    const initialLength = this.children.length;
+    this.children = this.children.filter(child => child.id !== id);
+    
+    // 削除が成功したかどうかを返す
+    return initialLength !== this.children.length;
+  }
+
+  // 特定の子ノードを削除（オブジェクト参照による）
+  removeChildNode(node: TreeNode<T>): boolean {
+    return this.removeChild(node.id);
+  }
+
+  // このノードを親から切り離す
+  detach(): boolean {
+    if (!this.parent) return false;
+    return this.parent.removeChildNode(this);
+  }
+
+  // 値の更新
+  updateValue(value: T): void {
+    this.value = value;
+  }
+
+  // メタデータの設定
+  setMetadata(key: string, value: any): void {
+    this.metadata[key] = value;
+  }
+
+  // メタデータの取得
+  getMetadata(key: string): any {
+    return this.metadata[key];
+  }
+
+  // 子孫ノードを含む全てのノードを深さ優先で探索
+  traverse(callback: (node: TreeNode<T>) => void): void {
+    callback(this);
+    for (const child of this.children) {
+      child.traverse(callback);
+    }
+  }
+
+  // JSONに変換する際に循環参照を防ぐ
+  toJSON(): Record<string, any> {
+    return {
+      id: this.id,
+      value: this.value,
+      children: this.children.map(child => child.toJSON()),
+      metadata: this.metadata
+    };
+  }
+
+  // このノードの深さを取得
+  getDepth(): number {
+    let depth = 0;
+    let current: TreeNode<T> | undefined = this;
+    
+    while (current?.parent) {
+      depth++;
+      current = current.parent;
+    }
+    
+    return depth;
+  }
+
+  // このノードのパスを取得（ルートからこのノードまでの配列）
+  getPath(): TreeNode<T>[] {
+    const path: TreeNode<T>[] = [];
+    let current: TreeNode<T> | undefined = this;
+    
+    while (current) {
+      path.unshift(current);
+      current = current.parent;
+    }
+    
+    return path;
+  }
+}
+
+// ツリー全体を管理するクラス
+class Tree<T> {
+  private root: TreeNode<T> | null;
+  private nodeMap: Map<string, TreeNode<T>>; // IDからノードへの素早いアクセス用
+
+  constructor() {
+    this.root = null;
+    this.nodeMap = new Map();
+  }
+
+  // ルートノードを設定
+  setRoot(value: T, id?: string): TreeNode<T> {
+    const node = new TreeNode<T>(value, id);
+    this.root = node;
+    this.registerNode(node);
+    return node;
+  }
+
+  // ノードをマップに登録（検索用）
+  private registerNode(node: TreeNode<T>): void {
+    this.nodeMap.set(node.id, node);
+    
+    // 子ノードも再帰的に登録
+    node.traverse(child => {
+      if (child !== node) {
+        this.nodeMap.set(child.id, child);
+      }
+    });
+  }
+
+  // ノードをマップから削除
+  private unregisterNode(node: TreeNode<T>): void {
+    this.nodeMap.delete(node.id);
+    
+    // 子ノードも再帰的に削除
+    node.traverse(child => {
+      if (child !== node) {
+        this.nodeMap.delete(child.id);
+      }
+    });
+  }
+
+  // IDからノードを検索
+  findById(id: string): TreeNode<T> | undefined {
+    return this.nodeMap.get(id);
+  }
+
+  // 条件に合うノードを検索
+  find(predicate: (node: TreeNode<T>) => boolean): TreeNode<T> | undefined {
+    for (const node of this.nodeMap.values()) {
+      if (predicate(node)) {
+        return node;
+      }
+    }
+    return undefined;
+  }
+
+  // 条件に合う全てのノードを検索
+  findAll(predicate: (node: TreeNode<T>) => boolean): TreeNode<T>[] {
+    const results: TreeNode<T>[] = [];
+    for (const node of this.nodeMap.values()) {
+      if (predicate(node)) {
+        results.push(node);
+      }
+    }
+    return results;
+  }
+
+  // ノードを追加（親ノードのIDを指定）
+  addNode(parentId: string, value: T, id?: string): TreeNode<T> | null {
+    const parent = this.findById(parentId);
+    if (!parent) return null;
+    
+    const newNode = parent.addChild(value, id);
+    this.nodeMap.set(newNode.id, newNode);
+    return newNode;
+  }
+
+  // ノードを削除
+  removeNode(id: string): boolean {
+    const node = this.findById(id);
+    if (!node) return false;
+    
+    // ルートノードの場合は特別処理
+    if (node === this.root) {
+      this.unregisterNode(node);
+      this.root = null;
+      return true;
+    }
+    
+    // 親ノードから削除
+    if (node.parent) {
+      const result = node.parent.removeChildNode(node);
+      if (result) {
+        this.unregisterNode(node);
+      }
+      return result;
+    }
+    
+    return false;
+  }
+
+  // ツリーを深さ優先探索で走査
+  depthFirstTraversal(callback: (node: TreeNode<T>) => void): void {
+    if (this.root) {
+      this.root.traverse(callback);
+    }
+  }
+
+  // ツリーを幅優先探索で走査
+  breadthFirstTraversal(callback: (node: TreeNode<T>) => void): void {
+    if (!this.root) return;
+    
+    const queue: TreeNode<T>[] = [this.root];
+    while (queue.length > 0) {
+      const node = queue.shift()!;
+      callback(node);
+      queue.push(...node.children);
+    }
+  }
+
+  // ツリーをJSONに変換
+  toJSON(): Record<string, any> | null {
+    return this.root ? this.root.toJSON() : null;
+  }
+
+  // JSON文字列からツリーを構築
+  static fromJSON<U>(json: string): Tree<U> {
+    const data = JSON.parse(json);
+    const tree = new Tree<U>();
+    
+    if (!data) return tree;
+    
+    // ルートノードの作成
+    const root = tree.setRoot(data.value, data.id);
+    
+    // 子ノードを再帰的に構築する補助関数
+    const buildChildren = (parentNode: TreeNode<U>, childrenData: any[]) => {
+      for (const childData of childrenData) {
+        const childNode = parentNode.addChild(childData.value, childData.id);
+        
+        // メタデータがあれば設定
+        if (childData.metadata) {
+          for (const [key, value] of Object.entries(childData.metadata)) {
+            childNode.setMetadata(key, value);
+          }
+        }
+        
+        // 子ノードがあれば再帰的に処理
+        if (childData.children && Array.isArray(childData.children)) {
+          buildChildren(childNode, childData.children);
+        }
+        
+        // ノードをマップに登録
+        tree.nodeMap.set(childNode.id, childNode);
+      }
+    };
+    
+    // 子ノードの構築
+    if (data.children && Array.isArray(data.children)) {
+      buildChildren(root, data.children);
+    }
+    
+    return tree;
+  }
+}
+
+// 使用例
+const fileTree = new Tree<string>();
+const rootFolder = fileTree.setRoot('Root');
+const documentsFolder = rootFolder.addChild('Documents');
+const picturesFolder = rootFolder.addChild('Pictures');
+documentsFolder.addChild('resume.pdf');
+documentsFolder.addChild('notes.txt');
+picturesFolder.addChild('vacation.jpg');
+picturesFolder.addChild('family.png');
+
+console.log(fileTree)
