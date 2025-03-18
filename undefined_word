@@ -1,101 +1,7 @@
-import { z } from 'zod';
-import { OpenAI } from 'langchain/llms/openai';
-import { PromptTemplate } from 'langchain/prompts';
-import { StructuredOutputParser } from 'langchain/output_parsers';
-
-// モデルの初期化
-const model = new OpenAI({
-  temperature: 0,
-  modelName: 'gpt-3.5-turbo',
-  openAIApiKey: process.env.OPENAI_API_KEY,
-});
-
-// データ構造の定義（Zodスキーマ）
-const undefinedWordsSchema = z.object({
-  undefined_words: z.array(z.string()).describe('意味が曖昧でcontextに記載がない単語のリスト'),
-  reasons: z.array(z.string()).describe('各単語が未定義と判断された理由'),
-});
-
-// 出力タイプの定義
-type UndefinedWords = z.infer<typeof undefinedWordsSchema>;
-
-// 未定義語を検出する関数
-async function detectUndefinedWords(
-  query: string, 
-  context: string
-): Promise<UndefinedWords> {
-  // パーサーのセットアップ
-  const parser = StructuredOutputParser.fromZodSchema(undefinedWordsSchema);
-  const formatInstructions = parser.getFormatInstructions();
-  
-  // プロンプトテンプレート
-  const prompt = new PromptTemplate({
-    template: `ユーザークエリの中で意味が曖昧でかつ[context]に存在しない単語を検出し、理由を説明してください。
-    {format_instructions}
-    
-    [ユーザークエリ]
-    {query}
-    
-    [context]
-    {context}
-    `,
-    inputVariables: ['query', 'context'],
-    partialVariables: { format_instructions: formatInstructions },
-  });
-  
-  // プロンプトの生成
-  const input = await prompt.format({
-    query,
-    context,
-  });
-  
-  // LLMからの回答を取得
-  const response = await model.call(input);
-  
-  // 回答をパース
-  return parser.parse(response);
-}
-
-// 使用例
-async function main() {
-  // テキストの例
-  const jokeQuery = "湖の畔に佇むと、突然の時雨音が響き渡り、その調べに合わせて霧翼の生き物たちが舞い始めた。伝説によれば、この音色を聞いた者は、一瞬だけ異界の扉を垣間見ることができるという。幾重にも重なる水の音色は、心の奥深くに眠る記憶を呼び覚まし、湖面には過去の映像が鏡のように映し出されていった。";
-  
-  const context = `
-  [context]
-  花霧（はなぎり）: 意味 花が舞い散る様子が霧のように見える現象
-  月影人（つきかげびと）: 意味 月明かりの中でだけ姿を現す伝説の人
-  時雨音（しぐれね）- 時雨が降る時だけ聞こえる神秘的な音色
-  星語り（ほしがたり）- 星に願いを伝えると叶うとされる古い儀式
-  夢路師（ゆめじし）- 他人の夢に入り込み導く能力を持つ人
-  風記憶（かぜきおく）- 風に乗せて送ると相手に記憶が届くとされる言葉
-  空色言葉（そらいろことば）- 真実だけを映し出すと言われる特別な言葉
-  雨音石（あまねいし）- 雨が降ると音楽を奏でる不思議な石
-  光守り（ひかりまもり）- 闇から光を守る古代からの役目
-  波間信（なみまのぶ）- 海の波に託すと必ず届くとされるメッセージ
-  `;
-  
-  try {
-    // 未定義語の検出
-    const result = await detectUndefinedWords(jokeQuery, context);
-    console.log(JSON.stringify(result, null, 2));
-  } catch (error) {
-    console.error('Error:', error);
-  }
-}
-
-// メイン関数を実行
-if (require.main === module) {
-  main();
-}
-
-export { detectUndefinedWords, undefinedWordsSchema };
-
-
 // 実用的な木構造の実装例
 
 // ノードのインターフェース定義
-interface ITreeNode<T> {
+export interface ITreeNode<T> {
   id: string;                 // 一意のID（検索・参照用）
   value: T;                   // ノードの値
   children: ITreeNode<T>[];   // 子ノードの配列
@@ -104,7 +10,7 @@ interface ITreeNode<T> {
 }
 
 // ツリーノードの実装
-class TreeNode<T> implements ITreeNode<T> {
+export class TreeNode<T> implements ITreeNode<T> {
   id: string;
   value: T;
   children: TreeNode<T>[];
@@ -212,7 +118,7 @@ class TreeNode<T> implements ITreeNode<T> {
 }
 
 // ツリー全体を管理するクラス
-class Tree<T> {
+export class Tree<T> {
   private root: TreeNode<T> | null;
   private nodeMap: Map<string, TreeNode<T>>; // IDからノードへの素早いアクセス用
 
@@ -337,6 +243,122 @@ class Tree<T> {
     return this.root ? this.root.toJSON() : null;
   }
 
+  // ツリーをフィルタリングし、条件に合うノードだけの新しいツリーを返す
+  filter(predicate: (node: TreeNode<T>) => boolean): Tree<T> {
+    if (!this.root) return new Tree<T>();
+
+    const newTree = new Tree<T>();
+    
+    // 再帰的にノードをフィルタリングする関数
+    const filterNode = (node: TreeNode<T>, parentNode?: TreeNode<T>): TreeNode<T> | null => {
+      // このノードが条件に合うかチェック
+      const nodeMatches = predicate(node);
+      
+      // 子ノードを再帰的にフィルタリング
+      const filteredChildren: TreeNode<T>[] = [];
+      for (const child of node.children) {
+        const filteredChild = filterNode(child);
+        if (filteredChild) {
+          filteredChildren.push(filteredChild);
+        }
+      }
+      
+      // このノードが条件に合わないが、子ノードが条件に合う場合は含める
+      if (!nodeMatches && filteredChildren.length === 0) {
+        return null; // このノードとその子ノードは全て条件に合わない
+      }
+      
+      // 新しいノードを作成
+      let newNode: TreeNode<T>;
+      
+      if (parentNode) {
+        // 親がある場合は親の子として追加
+        newNode = parentNode.addChild(node.value, node.id);
+      } else {
+        // ルートノードの場合
+        newNode = newTree.setRoot(node.value, node.id);
+      }
+      
+      // メタデータをコピー
+      for (const [key, value] of Object.entries(node.metadata)) {
+        newNode.setMetadata(key, value);
+      }
+      
+      // フィルタリングされた子ノードを追加
+      for (const filteredChild of filteredChildren) {
+        if (filteredChild) {
+          // すでに親子関係が確立されているので何もしない
+        }
+      }
+      
+      return newNode;
+    };
+    
+    // ルートからフィルタリング開始
+    filterNode(this.root);
+    
+    return newTree;
+  }
+  
+  // 条件に合うノードだけを含む部分木を返す（子孫がマッチすれば親も含む）
+  filterSubtree(predicate: (node: TreeNode<T>) => boolean): Tree<T> {
+    if (!this.root) return new Tree<T>();
+    
+    const newTree = new Tree<T>();
+    
+    // ノードまたはその子孫が条件に合うかチェックする関数
+    const nodeOrDescendantsMatch = (node: TreeNode<T>): boolean => {
+      if (predicate(node)) return true;
+      
+      for (const child of node.children) {
+        if (nodeOrDescendantsMatch(child)) {
+          return true;
+        }
+      }
+      
+      return false;
+    };
+    
+    // 再帰的にサブツリーを構築する関数
+    const buildFilteredSubtree = (
+      node: TreeNode<T>, 
+      parentNode?: TreeNode<T>
+    ): TreeNode<T> | null => {
+      // このノードまたはその子孫が条件に合うかチェック
+      if (!nodeOrDescendantsMatch(node)) {
+        return null;
+      }
+      
+      // 新しいノードを作成
+      let newNode: TreeNode<T>;
+      
+      if (parentNode) {
+        // 親がある場合は親の子として追加
+        newNode = parentNode.addChild(node.value, node.id);
+      } else {
+        // ルートノードの場合
+        newNode = newTree.setRoot(node.value, node.id);
+      }
+      
+      // メタデータをコピー
+      for (const [key, value] of Object.entries(node.metadata)) {
+        newNode.setMetadata(key, value);
+      }
+      
+      // 再帰的に子ノードを処理
+      for (const child of node.children) {
+        buildFilteredSubtree(child, newNode);
+      }
+      
+      return newNode;
+    };
+    
+    // ルートから構築開始
+    buildFilteredSubtree(this.root);
+    
+    return newTree;
+  }
+
   // JSON文字列からツリーを構築
   static fromJSON<U>(json: string): Tree<U> {
     const data = JSON.parse(json);
@@ -379,13 +401,11 @@ class Tree<T> {
 }
 
 // 使用例
-const fileTree = new Tree<string>();
-const rootFolder = fileTree.setRoot('Root');
-const documentsFolder = rootFolder.addChild('Documents');
-const picturesFolder = rootFolder.addChild('Pictures');
-documentsFolder.addChild('resume.pdf');
-documentsFolder.addChild('notes.txt');
-picturesFolder.addChild('vacation.jpg');
-picturesFolder.addChild('family.png');
-
-console.log(fileTree)
+// const fileTree = new Tree<string>();
+// const rootFolder = fileTree.setRoot('Root');
+// const documentsFolder = rootFolder.addChild('Documents');
+// const picturesFolder = rootFolder.addChild('Pictures');
+// documentsFolder.addChild('resume.pdf');
+// documentsFolder.addChild('notes.txt');
+// picturesFolder.addChild('vacation.jpg');
+// picturesFolder.addChild('family.png');
